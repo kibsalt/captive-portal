@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Faiba WiFi &mdash; Connect</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Sora:wght@300;400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<div class="bg">
+  <div class="bg-grid"></div>
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+  <div class="bg-orb bg-orb-3"></div>
+</div>
+
+<div class="page">
+  <header>
+    <div class="logo">
+      <div class="logo-mark">JT</div>
+      <div class="logo-text">
+        <div class="logo-brand">Faiba WiFi</div>
+        <div class="logo-sub">Jamii Telecom</div>
+      </div>
+    </div>
+    <div class="header-badge">
+      <div class="dot"></div>
+      Network Available
+    </div>
+  </header>
+
+  <div class="card-wrap">
+    <!-- Info panel -->
+    <div class="info-panel">
+      <div class="venue-card">
+        <div class="venue-label">You are at</div>
+        <div class="venue-name">{{ venue }}</div>
+        <div class="venue-loc">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          {{ location }}
+        </div>
+      </div>
+
+      <div class="speed-grid">
+        <div class="speed-card">
+          <div class="speed-val">20</div>
+          <div class="speed-unit">Mbps</div>
+          <div class="speed-lbl">Download</div>
+        </div>
+        <div class="speed-card">
+          <div class="speed-val">10</div>
+          <div class="speed-unit">Mbps</div>
+          <div class="speed-lbl">Upload</div>
+        </div>
+      </div>
+
+      <div class="session-info">
+        <div class="session-row">
+          <span class="session-key">Network</span>
+          <span class="session-val">JTL-FaibaGuest</span>
+        </div>
+        <div class="session-row">
+          <span class="session-key">Technology</span>
+          <span class="session-val">WiFi 6 (802.11ax)</span>
+        </div>
+        <div class="session-row">
+          <span class="session-key">Coverage</span>
+          <span class="session-val">All JTL hotspots</span>
+        </div>
+        <div class="session-row">
+          <span class="session-key">Encryption</span>
+          <span class="session-val">WPA3 / OWE</span>
+        </div>
+        <div class="session-row">
+          <span class="session-key">Support</span>
+          <span class="session-val">0800 723 000</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Portal card -->
+    <div class="portal-card">
+      <div class="portal-header">
+        <div class="portal-title">Connect to the Internet</div>
+        <div class="portal-subtitle">Choose a plan and pay instantly</div>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('paid',this)">Data Plans</button>
+        <button class="tab" onclick="switchTab('free',this)">Free Access</button>
+        <button class="tab" onclick="switchTab('login',this)">I Have a Code</button>
+      </div>
+
+      <!-- Paid tab -->
+      <div id="tab-paid" class="panel active">
+        <div class="packages">
+          {% for plan in plans %}
+          <div class="pkg{% if loop.first %} selected{% endif %}"
+               onclick="selectPkg(this)"
+               data-plan-id="{{ plan.id }}"
+               data-price="{{ plan.price }}"
+               data-label="{{ plan.duration_label }} &middot; {{ plan.data_mb }} MB">
+            <span class="pkg-badge {{ plan.badge_class }}">{{ plan.badge }}</span>
+            <div class="pkg-name">{{ plan.name }}</div>
+            <div class="pkg-price">KES {{ plan.price }}<span>/{{ plan.slug[:2] if plan.slug != 'daily' else 'day' }}</span></div>
+            <div class="pkg-detail">{{ plan.description|replace('\n', '<br>')|safe }}</div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="pay-label">Pay with</div>
+
+        <div class="pay-grid">
+          <button class="pay-btn active" onclick="selectPay(this,'mpesa')">
+            <div class="pay-icon ic-mpesa">M</div>
+            M-Pesa
+          </button>
+          <button class="pay-btn" onclick="selectPay(this,'airtel')">
+            <div class="pay-icon ic-airtel">A</div>
+            Airtel Money
+          </button>
+          <button class="pay-btn" onclick="selectPay(this,'tkash')">
+            <div class="pay-icon ic-tkash">T</div>
+            T-Kash
+          </button>
+          <button class="pay-btn" onclick="selectPay(this,'equity')">
+            <div class="pay-icon ic-equity">EQ</div>
+            Equity Bank
+          </button>
+          <button class="pay-btn" onclick="selectPay(this,'kcb')">
+            <div class="pay-icon ic-kcb">KCB</div>
+            KCB Bank
+          </button>
+          <button class="pay-btn" onclick="selectPay(this,'coop')">
+            <div class="pay-icon ic-coop">CO-OP</div>
+            Co-op Bank
+          </button>
+          <button class="pay-btn" onclick="selectPay(this,'ncba')">
+            <div class="pay-icon ic-ncba">NCBA</div>
+            NCBA Bank
+          </button>
+          <button class="pay-btn" onclick="selectPay(this,'stanbic')">
+            <div class="pay-icon ic-stanbic">SB</div>
+            Stanbic
+          </button>
+          <button class="pay-btn" onclick="selectPay(this,'pesalink')">
+            <div class="pay-icon ic-pesalink">PL</div>
+            PesaLink
+          </button>
+          <button class="pay-btn" onclick="selectPay(this,'card')">
+            <div class="pay-icon ic-card">&#x1F4B3;</div>
+            Visa / MC
+          </button>
+          <button class="pay-btn" onclick="selectPay(this,'voucher')">
+            <div class="pay-icon ic-voucher">&#x1F3AB;</div>
+            Voucher
+          </button>
+          <button class="pay-btn" onclick="selectPay(this,'sms')">
+            <div class="pay-icon ic-sms">&#x1F4AC;</div>
+            SMS PIN
+          </button>
+        </div>
+
+        <div class="pay-input-wrap">
+          <label class="pay-input-label" id="input-label">M-Pesa Phone Number</label>
+          <input class="pay-input" id="pay-input" type="tel" placeholder="07XX XXX XXX" maxlength="15">
+          <div class="input-hint" id="input-hint">You will receive an M-Pesa STK push prompt on your phone</div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <span style="font-size:13px;color:var(--text-muted);">Total to pay</span>
+          <span id="total-display" style="font-family:'Sora',sans-serif;font-size:18px;font-weight:700;color:var(--green-700);">
+            KES {{ plans[0].price if plans else 30 }}
+          </span>
+        </div>
+
+        <button class="cta-btn" id="btn-pay" onclick="handlePay()">Pay &amp; Connect Now</button>
+        <div class="terms">By connecting you agree to our <a href="#">Terms of Use</a> and <a href="#">Privacy Policy</a>.<br>JTL complies with the Kenya Data Protection Act 2019.</div>
+      </div>
+
+      <!-- Free tab -->
+      <div id="tab-free" class="panel">
+        <div class="free-panel-inner">
+          <div class="free-icon">&#x1F4F6;</div>
+          <div class="free-title">{{ free_plan.duration_label if free_plan else '15 Minutes' }} Free</div>
+          <div class="free-desc">Get a quick taste of Faiba WiFi &mdash; no payment required. Just verify your phone number via SMS.</div>
+          <div class="free-limits">
+            <div class="free-limit-card"><div class="fl-val">{{ (free_plan.duration_seconds // 60) if free_plan else 15 }}</div><div class="fl-lbl">Minutes</div></div>
+            <div class="free-limit-card"><div class="fl-val">{{ free_plan.data_mb if free_plan else 50 }}</div><div class="fl-lbl">MB data</div></div>
+            <div class="free-limit-card"><div class="fl-val">{{ (free_plan.speed_down_kbps // 1024) if free_plan else 2 }}</div><div class="fl-lbl">Mbps</div></div>
+          </div>
+        </div>
+
+        <div id="otp-send-section">
+          <div class="free-otp-wrap">
+            <label class="pay-input-label">Your phone number</label>
+            <input class="pay-input" id="free-phone" type="tel" placeholder="07XX XXX XXX" maxlength="15">
+            <div class="input-hint">An SMS OTP will be sent. Standard SMS rates apply.</div>
+          </div>
+          <button class="cta-btn" id="btn-free" onclick="handleFree()">Send OTP &amp; Connect Free</button>
+        </div>
+
+        <div id="otp-verify-section" style="display:none;">
+          <div class="pay-input-wrap">
+            <label class="pay-input-label">Enter OTP Code</label>
+            <input class="pay-input" id="otp-code" type="text" placeholder="Enter 6-digit code" maxlength="6" style="text-align:center;letter-spacing:4px;font-size:20px;">
+            <div class="input-hint">Check your SMS inbox for the verification code</div>
+          </div>
+          <button class="cta-btn" id="btn-verify-otp" onclick="verifyOTP()">Verify &amp; Connect</button>
+          <div style="text-align:center;margin-top:10px;">
+            <a href="#" onclick="document.getElementById('otp-verify-section').style.display='none';document.getElementById('otp-send-section').style.display='block';return false;" style="font-size:12px;color:var(--green-600);">Resend OTP</a>
+          </div>
+        </div>
+
+        <div class="terms">Free access is limited to once per day per device. <a href="#">Fair Use Policy</a> applies.</div>
+      </div>
+
+      <!-- Login tab -->
+      <div id="tab-login" class="panel">
+        <div style="text-align:center;padding:8px 0 20px;">
+          <div style="font-size:40px;margin-bottom:10px;">&#x1F511;</div>
+          <div style="font-family:'Sora',sans-serif;font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px;">Enter Access Code</div>
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:20px;">Use a voucher code, promo code, or a code sent to your phone.</div>
+        </div>
+        <div class="pay-input-wrap">
+          <label class="pay-input-label">Access / Voucher Code</label>
+          <input class="pay-input" id="code-input" type="text" placeholder="e.g. FAIBA-XXXX-XXXX" style="text-transform:uppercase;letter-spacing:1px;">
+          <div class="input-hint">Enter the code exactly as received. Codes are case-insensitive.</div>
+        </div>
+        <div class="pay-input-wrap" style="margin-top:4px;">
+          <label class="pay-input-label">Phone Number (optional &mdash; for receipt)</label>
+          <input class="pay-input" id="code-phone" type="tel" placeholder="07XX XXX XXX">
+        </div>
+        <button class="cta-btn" id="btn-code" onclick="handleCode()">Activate &amp; Connect</button>
+        <div class="terms">Having trouble? Call <a href="tel:0800723000">0800 723 000</a> (toll free) or SMS &ldquo;WIFI&rdquo; to 22050.</div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Powered by <span>Jamii Telecommunications Limited</span> &nbsp;&middot;&nbsp; Faiba WiFi Network &nbsp;&middot;&nbsp; <span>www.jtl.co.ke</span>
+  </footer>
+</div>
+
+<!-- Success overlay -->
+<div class="success-overlay" id="success-overlay">
+  <div class="success-ring">&#x2713;</div>
+  <div class="success-title">You're Connected!</div>
+  <div class="success-sub" id="success-msg">Payment confirmed. Your session is now active. Enjoy Faiba WiFi!</div>
+  <div class="success-details" id="success-details"></div>
+  <button class="success-close" onclick="closeSuccess()">Browse the Internet</button>
+</div>
+
+<script src="{{ url_for('static', filename='js/portal.js') }}"></script>
+</body>
+</html>

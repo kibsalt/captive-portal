@@ -1,0 +1,7 @@
+__pycache__
+*.pyc
+.env.local
+.git
+.gitignore
+*.md
+data/
