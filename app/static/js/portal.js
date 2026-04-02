@@ -56,6 +56,87 @@ function selectPay(el, method) {
   inp.placeholder = cfg.placeholder;
   inp.type = cfg.type;
   inp.value = '';
+
+  // Show/hide M-Pesa code section
+  const mpesaSection = document.getElementById('mpesa-code-section');
+  if (method === 'mpesa') {
+    mpesaSection.style.display = 'block';
+  } else {
+    mpesaSection.style.display = 'none';
+    // Reset M-Pesa code fields when switching away
+    document.getElementById('mpesa-code-fields').classList.remove('visible');
+    document.getElementById('mpesa-code-toggle').classList.add('visible');
+  }
+}
+
+// --- Toggle M-Pesa code input ---
+function toggleMpesaCode() {
+  const fields = document.getElementById('mpesa-code-fields');
+  const toggle = document.getElementById('mpesa-code-toggle');
+  if (fields.classList.contains('visible')) {
+    fields.classList.remove('visible');
+    toggle.textContent = 'Already paid? Enter M-Pesa confirmation code';
+  } else {
+    fields.classList.add('visible');
+    toggle.textContent = 'Hide M-Pesa code input';
+    // Auto-focus the code input
+    setTimeout(() => document.getElementById('mpesa-code-input').focus(), 100);
+  }
+}
+
+// --- Handle M-Pesa confirmation code ---
+async function handleMpesaCode() {
+  const codeInput = document.getElementById('mpesa-code-input');
+  const phoneInput = document.getElementById('mpesa-code-phone');
+  const code = codeInput.value.trim().toUpperCase();
+  const phone = phoneInput.value.trim();
+
+  if (!code) {
+    codeInput.focus();
+    showToast('Please enter your M-Pesa confirmation code', 'error');
+    return;
+  }
+
+  if (!phone) {
+    phoneInput.focus();
+    showToast('Please enter the phone number used for payment', 'error');
+    return;
+  }
+
+  if (!selectedPlan) {
+    showToast('Please select a data plan', 'error');
+    return;
+  }
+
+  setLoading('btn-mpesa-code', true);
+
+  try {
+    const response = await fetch(API_BASE + '/api/payment/mpesa/verify-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mpesa_code: code,
+        phone: phone,
+        plan_id: selectedPlan.id,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.status === 'success' || data.status === 'completed') {
+      currentSessionId = data.session_id;
+      showSuccess(
+        "You're Connected!",
+        data.message || 'M-Pesa payment verified. Enjoy Faiba WiFi!'
+      );
+    } else {
+      showToast(data.error || data.message || 'Could not verify M-Pesa code', 'error');
+    }
+  } catch (err) {
+    showToast('Network error. Please try again.', 'error');
+  }
+
+  setLoading('btn-mpesa-code', false);
 }
 
 // --- Toast notifications ---
@@ -366,8 +447,9 @@ async function handleCode() {
   setLoading('btn-code', false);
 }
 
-// --- Initialize first plan as selected on page load ---
+// --- Initialize on page load ---
 document.addEventListener('DOMContentLoaded', () => {
+  // Select first plan
   const firstPkg = document.querySelector('.pkg');
   if (firstPkg) {
     firstPkg.classList.add('selected');
@@ -376,5 +458,11 @@ document.addEventListener('DOMContentLoaded', () => {
       price: firstPkg.dataset.price,
       label: firstPkg.dataset.label,
     };
+  }
+
+  // Show M-Pesa code section by default (mpesa is default payment method)
+  const mpesaSection = document.getElementById('mpesa-code-section');
+  if (mpesaSection) {
+    mpesaSection.style.display = 'block';
   }
 });

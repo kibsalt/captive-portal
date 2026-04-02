@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="format-detection" content="telephone=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Faiba WiFi &mdash; Connect</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Sora:wght@300;400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -165,11 +168,33 @@
 
         <div class="pay-input-wrap">
           <label class="pay-input-label" id="input-label">M-Pesa Phone Number</label>
-          <input class="pay-input" id="pay-input" type="tel" placeholder="07XX XXX XXX" maxlength="15">
+          <input class="pay-input" id="pay-input" type="tel" placeholder="07XX XXX XXX" maxlength="15" inputmode="tel">
           <div class="input-hint" id="input-hint">You will receive an M-Pesa STK push prompt on your phone</div>
         </div>
 
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <!-- M-Pesa code input option -->
+        <div id="mpesa-code-section">
+          <div class="mpesa-code-or" id="mpesa-code-divider">OR</div>
+          <div class="mpesa-code-toggle visible" id="mpesa-code-toggle" onclick="toggleMpesaCode()">
+            Already paid? Enter M-Pesa confirmation code
+          </div>
+          <div class="mpesa-code-fields" id="mpesa-code-fields">
+            <div class="mpesa-code-section">
+              <div class="pay-input-wrap" style="margin-bottom:8px;">
+                <label class="pay-input-label">M-Pesa Confirmation Code</label>
+                <input class="pay-input" id="mpesa-code-input" type="text" placeholder="e.g. SJ12ABC345" maxlength="15" inputmode="text">
+                <div class="input-hint">Enter the M-Pesa code from your SMS confirmation message</div>
+              </div>
+              <div class="pay-input-wrap" style="margin-bottom:8px;">
+                <label class="pay-input-label">Phone Number Used</label>
+                <input class="pay-input" id="mpesa-code-phone" type="tel" placeholder="07XX XXX XXX" maxlength="15" inputmode="tel">
+              </div>
+              <button class="cta-btn" id="btn-mpesa-code" onclick="handleMpesaCode()">Verify M-Pesa Code &amp; Connect</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0;">
           <span style="font-size:13px;color:var(--text-muted);">Total to pay</span>
           <span id="total-display" style="font-family:'Sora',sans-serif;font-size:18px;font-weight:700;color:var(--green-700);">
             KES {{ plans[0].price if plans else 30 }}
@@ -196,7 +221,7 @@
         <div id="otp-send-section">
           <div class="free-otp-wrap">
             <label class="pay-input-label">Your phone number</label>
-            <input class="pay-input" id="free-phone" type="tel" placeholder="07XX XXX XXX" maxlength="15">
+            <input class="pay-input" id="free-phone" type="tel" placeholder="07XX XXX XXX" maxlength="15" inputmode="tel">
             <div class="input-hint">An SMS OTP will be sent. Standard SMS rates apply.</div>
           </div>
           <button class="cta-btn" id="btn-free" onclick="handleFree()">Send OTP &amp; Connect Free</button>
@@ -205,7 +230,7 @@
         <div id="otp-verify-section" style="display:none;">
           <div class="pay-input-wrap">
             <label class="pay-input-label">Enter OTP Code</label>
-            <input class="pay-input" id="otp-code" type="text" placeholder="Enter 6-digit code" maxlength="6" style="text-align:center;letter-spacing:4px;font-size:20px;">
+            <input class="pay-input" id="otp-code" type="text" placeholder="Enter 6-digit code" maxlength="6" inputmode="numeric" style="text-align:center;letter-spacing:4px;font-size:20px;">
             <div class="input-hint">Check your SMS inbox for the verification code</div>
           </div>
           <button class="cta-btn" id="btn-verify-otp" onclick="verifyOTP()">Verify &amp; Connect</button>
@@ -231,7 +256,7 @@
         </div>
         <div class="pay-input-wrap" style="margin-top:4px;">
           <label class="pay-input-label">Phone Number (optional &mdash; for receipt)</label>
-          <input class="pay-input" id="code-phone" type="tel" placeholder="07XX XXX XXX">
+          <input class="pay-input" id="code-phone" type="tel" placeholder="07XX XXX XXX" inputmode="tel">
         </div>
         <button class="cta-btn" id="btn-code" onclick="handleCode()">Activate &amp; Connect</button>
         <div class="terms">Having trouble? Call <a href="tel:0800723000">0800 723 000</a> (toll free) or SMS &ldquo;WIFI&rdquo; to 22050.</div>

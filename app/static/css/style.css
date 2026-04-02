@@ -28,6 +28,8 @@ body {
   color: var(--text);
   min-height: 100vh;
   overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* -- background canvas -- */
@@ -200,6 +202,9 @@ header {
 }
 .pkg-badge.free{background:#f59e0b;}
 .pkg-badge.popular{background:var(--green-700);}
+.pkg-badge.value{background:#6366f1;}
+.pkg-badge.premium{background:#dc2626;}
+.pkg-badge.student{background:#0ea5e9;}
 .pkg-name { font-size:13px;font-weight:700;color:var(--text);margin-bottom:2px; }
 .pkg-price { font-family:'Sora',sans-serif;font-size:20px;font-weight:700;color:var(--green-700); }
 .pkg-price span{font-size:12px;font-weight:400;color:var(--text-muted);}
@@ -208,7 +213,7 @@ header {
 /* -- payment methods -- */
 .pay-label { font-size:12px;font-weight:600;color:var(--text-mid);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px; }
 
-.pay-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:16px; }
+.pay-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
 .pay-btn {
   border:1.5px solid var(--border); border-radius:10px;
   padding:10px 6px; cursor:pointer; transition:all 0.2s;
@@ -237,7 +242,7 @@ header {
 .ic-voucher { background:#8b5cf6; color:white; font-size:15px; }
 
 /* -- payment input -- */
-.pay-input-wrap { margin-bottom:16px; }
+.pay-input-wrap { margin-bottom:12px; }
 .pay-input-label { font-size:12px;font-weight:600;color:var(--text-mid);margin-bottom:6px;display:block; }
 .pay-input {
   width:100%; padding:11px 14px; border:1.5px solid var(--border); border-radius:10px;
@@ -246,6 +251,32 @@ header {
 }
 .pay-input:focus { border-color:var(--green-500); box-shadow:0 0 0 3px rgba(0,184,79,0.1); }
 .input-hint { font-size:11px;color:var(--text-muted);margin-top:4px; }
+
+/* -- M-Pesa code input section -- */
+.mpesa-code-section {
+  margin-top:8px; margin-bottom:12px;
+  padding:12px 14px;
+  background:var(--green-50); border:1px solid var(--border);
+  border-radius:10px;
+}
+.mpesa-code-toggle {
+  display:none; /* shown only when mpesa selected */
+  font-size:12px; color:var(--green-700); cursor:pointer;
+  font-weight:600; text-align:center;
+  padding:6px 0; margin-bottom:8px;
+}
+.mpesa-code-toggle:hover { text-decoration:underline; }
+.mpesa-code-toggle.visible { display:block; }
+.mpesa-code-fields { display:none; }
+.mpesa-code-fields.visible { display:block; }
+.mpesa-code-fields .pay-input { text-transform:uppercase; letter-spacing:1px; }
+.mpesa-code-or {
+  display:flex; align-items:center; gap:10px;
+  margin:10px 0 8px; font-size:11px; color:var(--text-muted);
+}
+.mpesa-code-or::before, .mpesa-code-or::after {
+  content:''; flex:1; height:1px; background:var(--border);
+}
 
 /* -- CTA -- */
 .cta-btn {
@@ -335,8 +366,122 @@ footer span { color:var(--green-400); }
 .toast.success { background:var(--green-600); }
 @keyframes slideDown{from{transform:translateX(-50%) translateY(-20px);opacity:0}to{transform:translateX(-50%) translateY(0);opacity:1}}
 
-@media(max-width:640px){
-  .packages{grid-template-columns:1fr 1fr;}
-  .pay-grid{grid-template-columns:repeat(3,1fr);}
-  .info-panel{display:none;}
+/* ====================== */
+/* MOBILE RESPONSIVE      */
+/* ====================== */
+
+@media(max-width:768px){
+  .page { padding:0 12px; }
+
+  header {
+    padding:14px 0 12px;
+    margin-bottom:16px;
+  }
+  .logo-mark { width:36px; height:36px; font-size:15px; border-radius:8px; }
+  .logo-brand { font-size:17px; }
+  .logo-sub { font-size:10px; }
+  .header-badge { padding:5px 10px; font-size:11px; }
+
+  .card-wrap {
+    gap:16px;
+    padding-bottom:20px;
+  }
+
+  .info-panel {
+    display:none;
+  }
+
+  .portal-card {
+    min-width:unset;
+    max-width:100%;
+    width:100%;
+    border-radius:16px;
+  }
+
+  .portal-header {
+    padding:20px 20px 16px;
+  }
+  .portal-title { font-size:19px; }
+  .portal-subtitle { font-size:12px; }
+
+  .tabs { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  .tab { padding:10px 6px; font-size:11px; white-space:nowrap; }
+
+  .panel { padding:16px 16px 20px; }
+
+  .packages {
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+    margin-bottom:14px;
+  }
+  .pkg {
+    padding:10px 10px;
+    border-radius:10px;
+  }
+  .pkg-badge { font-size:9px; padding:2px 6px; margin-bottom:4px; }
+  .pkg-name { font-size:12px; }
+  .pkg-price { font-size:17px; }
+  .pkg-price span { font-size:11px; }
+  .pkg-detail { font-size:10px; margin-top:3px; }
+
+  .pay-grid {
+    grid-template-columns:repeat(3,1fr);
+    gap:6px;
+    margin-bottom:10px;
+  }
+  .pay-btn { padding:8px 4px; font-size:9px; border-radius:8px; }
+  .pay-icon { width:28px; height:28px; font-size:13px; border-radius:6px; }
+  .ic-mpesa, .ic-airtel, .ic-tkash { font-size:10px; }
+  .ic-equity, .ic-coop, .ic-ncba, .ic-stanbic, .ic-pesalink, .ic-kcb { font-size:9px; }
+
+  .pay-input { padding:10px 12px; font-size:14px; border-radius:8px; }
+  .cta-btn { padding:12px; font-size:14px; border-radius:10px; }
+
+  .free-icon { font-size:36px; margin-bottom:8px; }
+  .free-title { font-size:16px; }
+  .free-desc { font-size:12px; margin-bottom:14px; }
+  .free-limits { gap:6px; margin-bottom:14px; }
+  .fl-val { font-size:14px; }
+
+  footer { padding:12px 0 16px; font-size:10px; }
+}
+
+@media(max-width:380px){
+  .page { padding:0 8px; }
+
+  .portal-header { padding:16px 14px 14px; }
+  .portal-title { font-size:17px; }
+  .panel { padding:12px 12px 16px; }
+
+  .packages { gap:6px; }
+  .pkg { padding:8px 8px; }
+  .pkg-name { font-size:11px; }
+  .pkg-price { font-size:15px; }
+
+  .pay-grid { grid-template-columns:repeat(3,1fr); gap:5px; }
+  .pay-btn { padding:6px 3px; font-size:8px; gap:3px; }
+  .pay-icon { width:24px; height:24px; font-size:11px; }
+
+  .cta-btn { padding:11px; font-size:13px; }
+
+  .success-title { font-size:22px; }
+  .success-sub { font-size:13px; }
+}
+
+/* Touch-friendly: larger tap targets on mobile */
+@media(hover:none) and (pointer:coarse){
+  .pkg { min-height:80px; }
+  .pay-btn { min-height:60px; }
+  .tab { min-height:44px; display:flex;align-items:center;justify-content:center; }
+  .cta-btn { min-height:48px; }
+  .pay-input { min-height:44px; }
+}
+
+/* Landscape phone */
+@media(max-height:500px) and (orientation:landscape){
+  header { padding:8px 0; margin-bottom:8px; }
+  .portal-header { padding:12px 16px 10px; }
+  .panel { padding:10px 16px 14px; }
+  .packages { margin-bottom:10px; }
+  .pay-grid { margin-bottom:8px; }
 }

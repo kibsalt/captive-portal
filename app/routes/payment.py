@@ -247,6 +247,103 @@ def mpesa_check(payment_id):
     })
 
 
+@payment_bp.route('/mpesa/verify-code', methods=['POST'])
+def mpesa_verify_code():
+    """Verify an M-Pesa confirmation code entered manually by the user.
+
+    This allows users who already paid (or whose STK push failed) to enter
+    their M-Pesa transaction code to activate their WiFi session.
+
+    Request JSON:
+        mpesa_code: str - M-Pesa confirmation code (e.g. SJ12ABC345)
+        phone: str - Phone number used for payment
+        plan_id: int - WiFi plan ID
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+
+    mpesa_code = (data.get('mpesa_code') or '').strip().upper()
+    phone = (data.get('phone') or '').strip()
+    plan_id = data.get('plan_id')
+
+    if not mpesa_code:
+        return jsonify({'error': 'M-Pesa confirmation code is required'}), 400
+    if not phone:
+        return jsonify({'error': 'Phone number is required'}), 400
+    if not plan_id:
+        return jsonify({'error': 'Please select a data plan'}), 400
+
+    plan = WiFiPlan.query.get(plan_id)
+    if not plan or not plan.active or plan.is_free:
+        return jsonify({'error': 'Invalid plan'}), 400
+
+    # Check if this M-Pesa code was already used
+    existing = Payment.query.filter_by(transaction_id=mpesa_code, status='completed').first()
+    if existing:
+        return jsonify({'error': 'This M-Pesa code has already been used'}), 400
+
+    # Verify the M-Pesa code via Lexabensa API
+    from app.services.mpesa import check_payment
+    result = check_payment(phone)
+
+    if not result.get('found'):
+        return jsonify({
+            'error': 'No M-Pesa payment found for this phone number. Please check and try again.'
+        }), 400
+
+    # Check if the code matches
+    api_code = (result.get('mpesa_code') or '').strip().upper()
+    if api_code and api_code != mpesa_code:
+        return jsonify({
+            'error': 'M-Pesa code does not match the latest payment. Please verify the code.'
+        }), 400
+
+    # Verify amount is sufficient
+    paid_amount = result.get('amount', 0)
+    if paid_amount < plan.price:
+        return jsonify({
+            'error': f'Payment of KES {paid_amount} found but KES {plan.price} is required for this plan.'
+        }), 400
+
+    # Create session and payment records
+    session = GuestSession(
+        phone=phone,
+        plan_id=plan.id,
+        venue=current_app.config['DEFAULT_VENUE'],
+        ip_address=request.remote_addr,
+        status='pending',
+    )
+    db.session.add(session)
+    db.session.flush()
+
+    payment = Payment(
+        session_id=session.id,
+        method='mpesa',
+        amount=plan.price,
+        phone=phone,
+        account_ref=f'FAIBA-{session.id[:8].upper()}',
+        transaction_id=mpesa_code,
+        status='completed',
+        completed_at=datetime.utcnow(),
+        status_message=f'M-Pesa code verified: {mpesa_code} (KES {paid_amount})',
+    )
+    db.session.add(payment)
+    db.session.commit()
+
+    activate_session(session.id)
+
+    logger.info(f'M-Pesa code verified manually: {mpesa_code} KES {paid_amount} for {phone}')
+
+    return jsonify({
+        'status': 'success',
+        'mpesa_code': mpesa_code,
+        'amount': paid_amount,
+        'session_id': session.id,
+        'message': f'Payment verified! Receipt: {mpesa_code}. Your session is now active.',
+    })
+
+
 @payment_bp.route('/confirm', methods=['POST'])
 def confirm_payment():
     """Manual payment confirmation (for testing or bank confirmations).
