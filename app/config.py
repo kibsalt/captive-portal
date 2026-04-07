@@ -48,13 +48,5 @@ class Config:
     FREE_SESSION_MB = int(os.getenv('FREE_SESSION_MB', 50))
     FREE_SESSION_SPEED_KBPS = int(os.getenv('FREE_SESSION_SPEED_KBPS', 2048))
 
-    # External MySQL voucher/billing database
-    # This is the existing RADIUS billing DB with M-Pesa SHA256-hashed phone records
-    EXTERNAL_DB_HOST = os.getenv('EXTERNAL_DB_HOST', '127.0.0.1')
-    EXTERNAL_DB_PORT = int(os.getenv('EXTERNAL_DB_PORT', 3306))
-    EXTERNAL_DB_USER = os.getenv('EXTERNAL_DB_USER', 'radius')
-    EXTERNAL_DB_PASSWORD = os.getenv('EXTERNAL_DB_PASSWORD', '')
-    EXTERNAL_DB_NAME = os.getenv('EXTERNAL_DB_NAME', 'radius')
-
     # Scheduler
     SCHEDULER_API_ENABLED = True

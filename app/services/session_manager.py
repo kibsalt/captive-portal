@@ -145,25 +145,26 @@ def activate_mac_session(mac_address, plan_id, credit_type, transaction_code=Non
 def activate_mac_session_from_external(mac_address, voucher_code, phone=None,
                                        amount=0, upspeed_kbps=0, downspeed_kbps=0,
                                        downlimit_bytes=0, session_end=0, venue=''):
-    """Create or extend a MacSession using data from the external MySQL voucher DB.
+    """Create or extend a MacSession using QoS data from the Lexabensa API.
 
-    Unlike activate_mac_session which looks up a WiFiPlan, this uses the raw
-    QoS values from the external DB record (upspeed, downspeed, downlimit, amount).
+    Unlike activate_mac_session which looks up a local WiFiPlan, this uses the
+    raw QoS values returned by Lexabensa (upspeed, downspeed, downlimit, amount).
 
-    The external `session_end` field determines duration:
-    - session_end == 0: unused voucher → use amount to determine a duration
+    Lexabensa API response format:
+        voucher,upspeed,downspeed,downlimit,amount,session_end,start_date
+
+    The session_end field determines duration:
+    - session_end == 0: unused voucher → use amount to determine duration
     - session_end > 0: already has an end time → calculate remaining
-
-    After activation, marks the external voucher as used.
 
     Args:
         mac_address: Device MAC
-        voucher_code: M-Pesa receipt / external voucher code
+        voucher_code: M-Pesa receipt code (from Lexabensa 'voucher' field)
         phone: Phone number
         amount: Amount paid in KES
-        upspeed_kbps: Upload speed from external DB
-        downspeed_kbps: Download speed from external DB
-        downlimit_bytes: Data limit from external DB (0 = unlimited)
+        upspeed_kbps: Upload speed from Lexabensa
+        downspeed_kbps: Download speed from Lexabensa
+        downlimit_bytes: Data limit from Lexabensa (0 = unlimited)
         session_end: Unix timestamp for session end (0 = unused)
         venue: Venue name
     """
@@ -269,22 +270,11 @@ def activate_mac_session_from_external(mac_address, voucher_code, phone=None,
 
     db.session.commit()
 
-    # Mark the external voucher as used
-    if session_end == 0:
-        try:
-            from flask import current_app
-            from app.services.external_vouchers import mark_voucher_used
-            import time
-            new_session_end = int(time.time()) + duration_seconds
-            mark_voucher_used(voucher_code, new_session_end, current_app.config)
-        except Exception as e:
-            logger.error(f'Failed to mark external voucher used: {e}')
-
     # Send RADIUS CoA
     _send_radius_coa_for_mac(mac_session)
 
     logger.info(
-        f'MAC session from external DB: {mac} | Voucher: {voucher_code} | '
+        f'MAC session from Lexabensa: {mac} | Voucher: {voucher_code} | '
         f'KES {amount} | {duration_seconds}s | '
         f'{downspeed_kbps}kbps down / {upspeed_kbps}kbps up | '
         f'Limit: {downlimit_bytes} bytes | Expires: {mac_session.expires_at}'

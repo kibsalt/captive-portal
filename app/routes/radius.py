@@ -2,19 +2,12 @@
 
 FreeRADIUS calls these endpoints for:
 - Authorization: Check if MAC has active session → return Accept with QoS or walled garden
-- Authentication: Verify MAC=MAC credentials (always accept, authorization controls access)
+- Authentication: Verify MAC=MAC credentials
 - Accounting: Track session start/stop/interim-update for data usage
 
-The external MySQL voucher DB is the source of truth for payment status.
-On RADIUS auth, if no local MacSession exists, we also check the external
-DB by phone (if known from a prior payment attempt) to auto-activate.
-
-RADIUS flow:
-1. Device connects → BRAS sends Access-Request(User-Name=MAC, User-Password=MAC)
-2. FreeRADIUS rlm_rest calls POST /api/radius/auth
-3. Portal checks MacSession → then external voucher DB as fallback
-4. User pays (STK push / M-Pesa code) → external DB gets the record
-5. Portal polls external DB, finds record → activates MacSession → sends CoA
+Payment verification uses the Lexabensa API:
+  GET https://lexabensa.com/api/?code=<phone_or_mpesa_code>
+  Returns: voucher,upspeed,downspeed,downlimit,amount,session_end,start_date
 """
 
 import logging
@@ -34,15 +27,10 @@ def radius_auth():
     """Handle FreeRADIUS authorization + authentication via rlm_rest.
 
     FreeRADIUS sends:
-        User-Name: MAC address (various formats)
+        User-Name: MAC address
         User-Password: MAC address (same as username — transparent MAC auth)
         NAS-IP-Address: BRAS/NAS IP
         Calling-Station-Id: Client MAC
-        Called-Station-Id: AP SSID/MAC
-        NAS-Identifier: NAS name
-        Framed-IP-Address: Client IP (if known)
-
-    Returns JSON that rlm_rest maps to RADIUS attributes.
     """
     data = request.get_json(silent=True) or {}
 
@@ -62,7 +50,7 @@ def radius_auth():
             'reply:Reply-Message': 'Unknown device. Connect to portal.',
         })
 
-    # Verify password = MAC (transparent MAC auth)
+    # Verify password = MAC
     expected_password = mac
     given_password = normalize_mac(password)
     if given_password and given_password != expected_password:
@@ -88,7 +76,7 @@ def radius_auth():
 
     mac_session.nas_ip = nas_ip
 
-    # Check local session first
+    # Check local session
     if mac_session.is_active:
         remaining = mac_session.remaining_seconds
         db.session.commit()
@@ -108,9 +96,9 @@ def radius_auth():
             'reply:WISPr-Bandwidth-Max-Up': mac_session.speed_up_kbps * 1000,
         })
 
-    # Not active locally — check external voucher DB if phone is known
+    # Not active locally — check Lexabensa API by phone if known
     if mac_session.phone:
-        ext_result = _check_external_and_activate(mac_session)
+        ext_result = _check_lexabensa_and_activate(mac_session)
         if ext_result:
             return ext_result
 
@@ -124,7 +112,7 @@ def radius_auth():
 
 
 def _walled_garden_response(mac):
-    """Return a walled-garden (captive portal only) RADIUS response."""
+    """Return a walled-garden RADIUS response."""
     return jsonify({
         'control:Auth-Type': 'Accept',
         'reply:Filter-Id': 'WALLED-GARDEN',
@@ -138,41 +126,40 @@ def _walled_garden_response(mac):
     })
 
 
-def _check_external_and_activate(mac_session):
-    """Check external MySQL voucher DB for a valid payment for this MAC's phone.
+def _check_lexabensa_and_activate(mac_session):
+    """Check Lexabensa API for a valid payment for this MAC's phone.
 
-    If found, auto-activate the MAC session using the external record's QoS data.
-    Returns a RADIUS Accept response, or None if nothing found.
+    Calls: GET https://lexabensa.com/api/?code=<phone>
+    If found with session_end=0 or still valid, auto-activate the MAC session.
     """
     try:
-        from app.services.external_vouchers import lookup_by_phone
+        from app.services.mpesa import check_payment
+        from app.services.session_manager import activate_mac_session_from_external
 
-        ext = lookup_by_phone(mac_session.phone, current_app.config)
-        if not ext:
+        result = check_payment(mac_session.phone)
+        if not result.get('found') or not result.get('is_unused', False):
             return None
 
-        # Found a valid external voucher — activate using its QoS
-        from app.services.session_manager import activate_mac_session_from_external
-        result = activate_mac_session_from_external(
+        mac_result = activate_mac_session_from_external(
             mac_address=mac_session.mac_address,
-            voucher_code=ext['voucher'],
+            voucher_code=result['voucher'],
             phone=mac_session.phone,
-            amount=ext['amount'],
-            upspeed_kbps=ext['upspeed'],
-            downspeed_kbps=ext['downspeed'],
-            downlimit_bytes=ext['downlimit'],
-            session_end=ext['session_end'],
+            amount=result['amount'],
+            upspeed_kbps=result['upspeed'],
+            downspeed_kbps=result['downspeed'],
+            downlimit_bytes=result['downlimit'],
+            session_end=result['session_end'],
             venue=mac_session.venue,
         )
-        if not result:
+        if not mac_result:
             return None
 
-        # Reload session after activation
+        # Reload session
         db.session.refresh(mac_session)
         remaining = mac_session.remaining_seconds
 
-        logger.info(f'RADIUS auth: {mac_session.mac_address} → auto-activated from external DB '
-                    f'voucher={ext["voucher"]}')
+        logger.info(f'RADIUS auth: {mac_session.mac_address} → auto-activated from Lexabensa '
+                    f'voucher={result["voucher"]}')
 
         return jsonify({
             'control:Auth-Type': 'Accept',
@@ -187,7 +174,7 @@ def _check_external_and_activate(mac_session):
         })
 
     except Exception as e:
-        logger.error(f'External DB check during RADIUS auth failed: {e}')
+        logger.error(f'Lexabensa check during RADIUS auth failed: {e}')
         return None
 
 

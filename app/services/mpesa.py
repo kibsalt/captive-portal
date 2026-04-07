@@ -1,17 +1,24 @@
-"""M-Pesa payment via Lexabensa gateway (direct IP, bypasses DNS).
+"""M-Pesa payment via Lexabensa gateway.
 
-STK Push:  POST https://13.247.238.26/paying/payment.php  (amount + payer)
-Verify:    GET  https://13.247.238.26/api/?code=<phone>
+STK Push:  POST https://lexabensa.com/paying/payment.php  (amount + payer)
+Verify:    GET  https://lexabensa.com/api/?code=<code>
 
-Uses Host header to route through Nginx virtual hosting.
-SSL verification disabled since cert is issued for lexabensa.com, not the IP.
+The verify endpoint accepts BOTH:
+  - Phone number:  ?code=0729597196  → returns voucher for that phone
+  - M-Pesa code:   ?code=UD2GEB7XGS → returns voucher by receipt code
 
-Verification response is CSV:
-  mpesa_code,field1,field2,field3,amount,field5,start_time
+Response is CSV:
+  voucher,upspeed,downspeed,downlimit,amount,session_end,start_date
 
-  - amount:     KES paid (e.g. 10, 5)
-  - start_time: unix timestamp if session used, 0 if unused/available
-  - mpesa_code: M-Pesa receipt number
+  - voucher:     M-Pesa receipt number (e.g. UD2GEB7XGS)
+  - upspeed:     Upload speed in kbps (e.g. 4096)
+  - downspeed:   Download speed in kbps (e.g. 4096)
+  - downlimit:   Data limit in bytes (0 = unlimited)
+  - amount:      KES paid (e.g. 5, 10, 100)
+  - session_end: Unix timestamp when session ends (0 = unused/available)
+  - start_date:  Unix timestamp when session started (0 = not started)
+
+Uses direct IP with Host header to bypass DNS / SSL cert mismatch.
 """
 
 import logging
@@ -19,7 +26,6 @@ import logging
 import requests
 from urllib3.exceptions import InsecureRequestWarning
 
-# Suppress SSL warnings since we hit the IP directly with verify=False
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
@@ -65,62 +71,103 @@ def stk_push(phone: str, amount: int) -> dict:
         return {'success': False, 'message': f'Payment service error: {e}'}
 
 
-def check_payment(phone: str) -> dict:
-    """Check payment status via Lexabensa verification API.
+def _parse_lexabensa_response(raw: str) -> dict | None:
+    """Parse Lexabensa CSV response into a structured dict.
+
+    Format: voucher,upspeed,downspeed,downlimit,amount,session_end,start_date
+    Example: UD2GEB7XGS,4096,4096,0,5,0,0
+    May have parentheses: (UD2GEB7XGS,4096,4096,0,5,0,0)
+    """
+    if not raw:
+        return None
+
+    clean = raw.strip('() \n\r')
+    parts = [p.strip() for p in clean.split(',')]
+
+    if len(parts) < 5:
+        return None
+
+    voucher = parts[0]
+    # If the voucher looks like just "0" or empty, it's not a real record
+    if not voucher or voucher == '0':
+        return None
+
+    def safe_int(val, default=0):
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return default
+
+    return {
+        'voucher': voucher,
+        'upspeed': safe_int(parts[1]) if len(parts) > 1 else 0,
+        'downspeed': safe_int(parts[2]) if len(parts) > 2 else 0,
+        'downlimit': safe_int(parts[3]) if len(parts) > 3 else 0,
+        'amount': safe_int(parts[4]) if len(parts) > 4 else 0,
+        'session_end': safe_int(parts[5]) if len(parts) > 5 else 0,
+        'start_date': safe_int(parts[6]) if len(parts) > 6 else 0,
+    }
+
+
+def _call_lexabensa(code: str) -> dict:
+    """Call the Lexabensa API with a code (phone number or M-Pesa receipt).
 
     Returns:
         {
             'found': bool,
-            'mpesa_code': str,
-            'amount': int,
-            'start_time': int,
-            'is_unused': bool,    # start_time == 0 means available
+            'voucher': str,       # M-Pesa receipt code
+            'upspeed': int,       # kbps
+            'downspeed': int,     # kbps
+            'downlimit': int,     # bytes (0 = unlimited)
+            'amount': int,        # KES
+            'session_end': int,   # unix timestamp (0 = unused)
+            'start_date': int,    # unix timestamp (0 = not started)
+            'is_unused': bool,    # session_end == 0
             'raw': str,
         }
     """
-    phone = normalize_phone(phone)
     try:
         response = requests.get(
             LEXABENSA_API_URL,
             headers=LEXABENSA_HEADERS,
-            params={'code': phone},
+            params={'code': code},
             timeout=15,
             verify=False,
         )
         raw = response.text.strip()
-        logger.info(f'Payment check: phone={phone} response={raw}')
+        logger.info(f'Lexabensa API: code={code} response={raw}')
 
-        if not raw or raw.startswith('0') and ',' not in raw:
+        parsed = _parse_lexabensa_response(raw)
+        if not parsed:
             return {'found': False, 'raw': raw}
 
-        # Parse CSV: mpesa_code,f1,f2,f3,amount,f5,start_time
-        # Handle parentheses: "(TFA1BM87H1,4096,4096,0,10,0,1754422908)"
-        clean = raw.strip('() \n\r')
-        parts = [p.strip() for p in clean.split(',')]
-
-        if len(parts) < 5:
-            return {'found': False, 'raw': raw}
-
-        mpesa_code = parts[0]
-        try:
-            amount = int(parts[4])
-        except (ValueError, IndexError):
-            amount = 0
-
-        try:
-            start_time = int(parts[6]) if len(parts) > 6 else 0
-        except (ValueError, IndexError):
-            start_time = 0
-
-        return {
-            'found': True,
-            'mpesa_code': mpesa_code,
-            'amount': amount,
-            'start_time': start_time,
-            'is_unused': start_time == 0,
-            'raw': raw,
-        }
+        parsed['found'] = True
+        parsed['is_unused'] = parsed['session_end'] == 0
+        parsed['raw'] = raw
+        # Alias for backwards compatibility
+        parsed['mpesa_code'] = parsed['voucher']
+        return parsed
 
     except requests.exceptions.RequestException as e:
-        logger.error(f'Payment check failed: {e}')
+        logger.error(f'Lexabensa API call failed for code={code}: {e}')
         return {'found': False, 'raw': str(e)}
+
+
+def check_payment(phone: str) -> dict:
+    """Check payment status by phone number.
+
+    Calls: GET https://lexabensa.com/api/?code=0729597196
+    Returns the full voucher record if found.
+    """
+    phone = normalize_phone(phone)
+    return _call_lexabensa(phone)
+
+
+def check_mpesa_code(mpesa_code: str) -> dict:
+    """Check payment status by M-Pesa receipt code.
+
+    Calls: GET https://lexabensa.com/api/?code=UD2GEB7XGS
+    Returns the full voucher record if found.
+    """
+    mpesa_code = mpesa_code.strip().upper()
+    return _call_lexabensa(mpesa_code)
