@@ -16,7 +16,7 @@ class Config:
 
     # Portal
     PORTAL_HOST = os.getenv('PORTAL_HOST', '192.168.14.4')
-    PORTAL_PORT = int(os.getenv('PORTAL_PORT', 8280))
+    PORTAL_PORT = int(os.getenv('PORTAL_PORT', 8480))
     DEFAULT_VENUE = os.getenv('DEFAULT_VENUE', 'Two Rivers Mall')
     DEFAULT_LOCATION = os.getenv('DEFAULT_LOCATION', 'Limuru Road, Nairobi')
 

@@ -1,34 +1,22 @@
-version: '3.8'
-
 services:
   portal:
     build: .
     container_name: faiba-captive-portal
     restart: unless-stopped
     env_file: .env
+    ports:
+      - "8480:8480"
+    environment:
+      - PORTAL_PORT=8480
+      - GUNICORN_WORKERS=4
     volumes:
       - portal_data:/app/data
-    expose:
-      - "5000"
-    networks:
-      - portal_net
-
-  nginx:
-    image: nginx:alpine
-    container_name: faiba-portal-nginx
-    restart: unless-stopped
-    ports:
-      - "192.168.14.4:8280:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - portal
-    networks:
-      - portal_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8480/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   portal_data:
-
-networks:
-  portal_net:
-    driver: bridge
