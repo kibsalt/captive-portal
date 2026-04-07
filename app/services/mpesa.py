@@ -18,22 +18,17 @@ Response is CSV:
   - session_end: Unix timestamp when session ends (0 = unused/available)
   - start_date:  Unix timestamp when session started (0 = not started)
 
-Uses direct IP with Host header to bypass DNS / SSL cert mismatch.
+No Daraja API keys needed — Lexabensa handles the M-Pesa integration.
 """
 
 import logging
 
 import requests
-from urllib3.exceptions import InsecureRequestWarning
-
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 
-LEXABENSA_HOST = 'lexabensa.com'
-LEXABENSA_STK_URL = 'https://13.247.238.26/paying/payment.php'
-LEXABENSA_API_URL = 'https://13.247.238.26/api/'
-LEXABENSA_HEADERS = {'Host': LEXABENSA_HOST}
+LEXABENSA_STK_URL = 'https://lexabensa.com/paying/payment.php'
+LEXABENSA_API_URL = 'https://lexabensa.com/api/'
 
 
 def normalize_phone(phone: str) -> str:
@@ -56,10 +51,8 @@ def stk_push(phone: str, amount: int) -> dict:
     try:
         response = requests.post(
             LEXABENSA_STK_URL,
-            headers=LEXABENSA_HEADERS,
             data={'amount': int(amount), 'payer': phone},
             timeout=30,
-            verify=False,
         )
         logger.info(f'STK push sent: phone={phone} amount={amount} status={response.status_code}')
         return {
@@ -129,10 +122,8 @@ def _call_lexabensa(code: str) -> dict:
     try:
         response = requests.get(
             LEXABENSA_API_URL,
-            headers=LEXABENSA_HEADERS,
             params={'code': code},
             timeout=15,
-            verify=False,
         )
         raw = response.text.strip()
         logger.info(f'Lexabensa API: code={code} response={raw}')

@@ -30,13 +30,8 @@ class Config:
     RADIUS_SECRET = os.getenv('RADIUS_SECRET', 'bssadmin+ZTE').encode()
     RADIUS_NAS_ID = os.getenv('RADIUS_NAS_ID', 'faiba-guest-portal')
 
-    # M-Pesa
-    MPESA_CONSUMER_KEY = os.getenv('MPESA_CONSUMER_KEY', '')
-    MPESA_CONSUMER_SECRET = os.getenv('MPESA_CONSUMER_SECRET', '')
-    MPESA_SHORTCODE = os.getenv('MPESA_SHORTCODE', '174379')
-    MPESA_PASSKEY = os.getenv('MPESA_PASSKEY', '')
-    MPESA_CALLBACK_URL = os.getenv('MPESA_CALLBACK_URL', '')
-    MPESA_ENV = os.getenv('MPESA_ENV', 'sandbox')
+    # M-Pesa (via Lexabensa gateway — no Daraja keys needed)
+    MPESA_ENV = os.getenv('MPESA_ENV', 'production')
 
     # SMS
     AT_USERNAME = os.getenv('AT_USERNAME', 'sandbox')
