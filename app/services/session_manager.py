@@ -142,6 +142,176 @@ def activate_mac_session(mac_address, plan_id, credit_type, transaction_code=Non
     }
 
 
+def activate_mac_session_from_external(mac_address, voucher_code, phone=None,
+                                       amount=0, upspeed_kbps=0, downspeed_kbps=0,
+                                       downlimit_bytes=0, session_end=0, venue=''):
+    """Create or extend a MacSession using data from the external MySQL voucher DB.
+
+    Unlike activate_mac_session which looks up a WiFiPlan, this uses the raw
+    QoS values from the external DB record (upspeed, downspeed, downlimit, amount).
+
+    The external `session_end` field determines duration:
+    - session_end == 0: unused voucher → use amount to determine a duration
+    - session_end > 0: already has an end time → calculate remaining
+
+    After activation, marks the external voucher as used.
+
+    Args:
+        mac_address: Device MAC
+        voucher_code: M-Pesa receipt / external voucher code
+        phone: Phone number
+        amount: Amount paid in KES
+        upspeed_kbps: Upload speed from external DB
+        downspeed_kbps: Download speed from external DB
+        downlimit_bytes: Data limit from external DB (0 = unlimited)
+        session_end: Unix timestamp for session end (0 = unused)
+        venue: Venue name
+    """
+    mac = normalize_mac(mac_address)
+    if not mac:
+        logger.error(f'Invalid MAC address: {mac_address}')
+        return None
+
+    # Check for duplicate
+    existing_credit = MacCredit.query.filter_by(transaction_code=voucher_code).first()
+    if existing_credit:
+        logger.warning(f'Duplicate external voucher code: {voucher_code}')
+        return None
+
+    # Determine session duration from amount (price → duration mapping)
+    # This maps to the seeded plans:  30→1h, 50→3h, 100→24h, 150→2d, 250→7d, 350→30d, 500→30d, 1000→30d
+    duration_map = [
+        (1000, 2592000),  # KES 1000 → 30 days
+        (500, 2592000),   # KES 500 → 30 days
+        (350, 2592000),   # KES 350 → 30 days
+        (250, 604800),    # KES 250 → 7 days
+        (150, 172800),    # KES 150 → 2 days
+        (100, 86400),     # KES 100 → 24 hours
+        (50, 10800),      # KES 50 → 3 hours
+        (30, 3600),       # KES 30 → 1 hour
+        (10, 3600),       # KES 10 → 1 hour
+        (5, 1800),        # KES 5 → 30 min
+    ]
+
+    if session_end > 0:
+        # External DB already has an end time — calculate remaining seconds
+        import time
+        remaining = max(0, session_end - int(time.time()))
+        duration_seconds = remaining if remaining > 0 else 3600
+    else:
+        # Unused voucher — determine duration from amount
+        duration_seconds = 3600  # default 1 hour
+        for threshold, seconds in duration_map:
+            if amount >= threshold:
+                duration_seconds = seconds
+                break
+
+    # Find or create MacSession
+    mac_session = MacSession.query.filter_by(mac_address=mac).first()
+    now = datetime.utcnow()
+
+    if not mac_session:
+        mac_session = MacSession(
+            mac_address=mac,
+            status='active',
+            first_activated_at=now,
+            phone=phone,
+            venue=venue,
+        )
+        db.session.add(mac_session)
+        db.session.flush()
+
+    # Create credit record (plan_id=0 since this comes from external DB)
+    # Find the closest matching plan or use plan_id=1 as fallback
+    closest_plan_id = _find_closest_plan(amount)
+
+    credit = MacCredit(
+        mac_session_id=mac_session.id,
+        plan_id=closest_plan_id,
+        credit_type='mpesa',
+        transaction_code=voucher_code,
+        phone=phone,
+        amount_paid=amount,
+        seconds_added=duration_seconds,
+        data_bytes_added=downlimit_bytes,
+        speed_down_kbps=downspeed_kbps,
+        speed_up_kbps=upspeed_kbps,
+    )
+    db.session.add(credit)
+
+    # Stack onto session
+    if mac_session.status == 'active' and mac_session.expires_at and mac_session.expires_at > now:
+        mac_session.expires_at += timedelta(seconds=duration_seconds)
+        mac_session.total_seconds += duration_seconds
+        if downlimit_bytes > 0:
+            mac_session.total_data_bytes += downlimit_bytes
+    else:
+        mac_session.status = 'active'
+        mac_session.expires_at = now + timedelta(seconds=duration_seconds)
+        mac_session.total_seconds = duration_seconds
+        mac_session.total_data_bytes = downlimit_bytes
+        mac_session.data_used_bytes = 0
+        if not mac_session.first_activated_at:
+            mac_session.first_activated_at = now
+
+    # Use the external DB's speed values
+    if downspeed_kbps > 0:
+        mac_session.speed_down_kbps = max(mac_session.speed_down_kbps, downspeed_kbps)
+    if upspeed_kbps > 0:
+        mac_session.speed_up_kbps = max(mac_session.speed_up_kbps, upspeed_kbps)
+
+    if phone:
+        mac_session.phone = phone
+    if venue:
+        mac_session.venue = venue
+
+    mac_session.acct_session_id = f'FAIBA-{mac.replace(":", "").upper()}'
+
+    db.session.commit()
+
+    # Mark the external voucher as used
+    if session_end == 0:
+        try:
+            from flask import current_app
+            from app.services.external_vouchers import mark_voucher_used
+            import time
+            new_session_end = int(time.time()) + duration_seconds
+            mark_voucher_used(voucher_code, new_session_end, current_app.config)
+        except Exception as e:
+            logger.error(f'Failed to mark external voucher used: {e}')
+
+    # Send RADIUS CoA
+    _send_radius_coa_for_mac(mac_session)
+
+    logger.info(
+        f'MAC session from external DB: {mac} | Voucher: {voucher_code} | '
+        f'KES {amount} | {duration_seconds}s | '
+        f'{downspeed_kbps}kbps down / {upspeed_kbps}kbps up | '
+        f'Limit: {downlimit_bytes} bytes | Expires: {mac_session.expires_at}'
+    )
+
+    return {
+        'mac': mac,
+        'status': 'active',
+        'voucher_code': voucher_code,
+        'expires_at': mac_session.expires_at.isoformat(),
+        'remaining_seconds': mac_session.remaining_seconds,
+        'remaining_data_mb': mac_session.remaining_data_bytes // (1024 * 1024) if downlimit_bytes > 0 else None,
+        'speed_down_kbps': mac_session.speed_down_kbps,
+        'credits_count': len(mac_session.credits),
+    }
+
+
+def _find_closest_plan(amount):
+    """Find the WiFiPlan ID closest to the given amount. Fallback to 1."""
+    plan = WiFiPlan.query.filter(
+        WiFiPlan.price <= amount,
+        WiFiPlan.is_free == False,
+        WiFiPlan.active == True,
+    ).order_by(WiFiPlan.price.desc()).first()
+    return plan.id if plan else 1
+
+
 # ─── Legacy GuestSession activation (backwards compatible) ──────────────
 
 def activate_session(session_id):

@@ -194,10 +194,11 @@ def mpesa_callback():
 
 @payment_bp.route('/mpesa/check/<int:payment_id>')
 def mpesa_check(payment_id):
-    """Check M-Pesa payment status via Lexabensa verification API.
+    """Check M-Pesa payment status — polls both Lexabensa API and external MySQL DB.
 
     Called by frontend polling after STK push is sent.
-    If payment is confirmed and amount matches, auto-activates the WiFi session.
+    Checks the external voucher DB (SHA256 phone hash lookup) first,
+    then falls back to Lexabensa API.
     """
     payment = Payment.query.get(payment_id)
     if not payment:
@@ -217,13 +218,60 @@ def mpesa_check(payment_id):
     if not phone:
         return jsonify({'status': 'pending', 'message': 'Waiting for payment...'})
 
+    # --- Check external MySQL voucher DB first (SHA256 hash lookup) ---
+    try:
+        from app.services.external_vouchers import lookup_by_phone
+        ext = lookup_by_phone(phone, current_app.config)
+
+        if ext and ext.get('voucher'):
+            paid_amount = ext['amount']
+            mpesa_code = ext['voucher']
+
+            if paid_amount >= payment.amount:
+                # Payment confirmed from external DB
+                payment.status = 'completed'
+                payment.transaction_id = mpesa_code
+                payment.completed_at = datetime.utcnow()
+                payment.status_message = f'M-Pesa confirmed (external DB): {mpesa_code} (KES {paid_amount})'
+                db.session.commit()
+
+                # Activate using external DB QoS if MAC available
+                mac = normalize_mac(payment.session.mac_address) if payment.session else None
+                if mac:
+                    from app.services.session_manager import activate_mac_session_from_external
+                    activate_mac_session_from_external(
+                        mac_address=mac,
+                        voucher_code=mpesa_code,
+                        phone=phone,
+                        amount=paid_amount,
+                        upspeed_kbps=ext['upspeed'],
+                        downspeed_kbps=ext['downspeed'],
+                        downlimit_bytes=ext['downlimit'],
+                        session_end=ext['session_end'],
+                        venue=current_app.config['DEFAULT_VENUE'],
+                    )
+                else:
+                    activate_session(payment.session_id)
+
+                logger.info(f'M-Pesa confirmed (external DB): {mpesa_code} KES {paid_amount} for {phone}')
+
+                return jsonify({
+                    'status': 'completed',
+                    'mpesa_code': mpesa_code,
+                    'amount': paid_amount,
+                    'session_id': payment.session_id,
+                    'message': f'Payment confirmed! Receipt: {mpesa_code}',
+                })
+    except Exception as e:
+        logger.warning(f'External DB check failed during polling, falling back to Lexabensa: {e}')
+
+    # --- Fallback: check Lexabensa API ---
     from app.services.mpesa import check_payment
     result = check_payment(phone)
 
     if not result.get('found'):
         return jsonify({'status': 'pending', 'message': 'Waiting for M-Pesa confirmation...'})
 
-    # Payment found — verify amount matches
     paid_amount = result.get('amount', 0)
     if paid_amount < payment.amount:
         return jsonify({
@@ -231,7 +279,7 @@ def mpesa_check(payment_id):
             'message': f'Payment of KES {paid_amount} found but KES {payment.amount} required.',
         })
 
-    # Payment confirmed — activate session
+    # Payment confirmed via Lexabensa
     payment.status = 'completed'
     payment.transaction_id = result.get('mpesa_code', '')
     payment.completed_at = datetime.utcnow()
@@ -240,7 +288,7 @@ def mpesa_check(payment_id):
 
     activate_session(payment.session_id)
 
-    logger.info(f'M-Pesa payment confirmed: {result.get("mpesa_code")} KES {paid_amount} for {phone}')
+    logger.info(f'M-Pesa payment confirmed (Lexabensa): {result.get("mpesa_code")} KES {paid_amount} for {phone}')
 
     return jsonify({
         'status': 'completed',
@@ -287,13 +335,92 @@ def mpesa_verify_code():
     if not plan or not plan.active or plan.is_free:
         return jsonify({'error': 'Invalid plan'}), 400
 
-    # Check if this M-Pesa code was already used (in Payment or MacCredit)
+    # Check if this M-Pesa code was already used locally
     existing_payment = Payment.query.filter_by(transaction_id=mpesa_code, status='completed').first()
     existing_credit = MacCredit.query.filter_by(transaction_code=mpesa_code).first()
     if existing_payment or existing_credit:
         return jsonify({'error': 'This M-Pesa code has already been used'}), 400
 
-    # Verify the M-Pesa code via Lexabensa API
+    mac = normalize_mac(mac_address)
+    ext = None
+    paid_amount = 0
+
+    # --- Strategy 1: Look up by M-Pesa code in external MySQL DB ---
+    try:
+        from app.services.external_vouchers import lookup_by_mpesa_code, lookup_by_phone
+        ext = lookup_by_mpesa_code(mpesa_code, current_app.config)
+
+        # If not found by code, try by phone hash
+        if not ext:
+            ext = lookup_by_phone(phone, current_app.config)
+            # Verify the code matches
+            if ext and ext.get('voucher', '').upper() != mpesa_code:
+                ext = None
+    except Exception as e:
+        logger.warning(f'External DB lookup failed, falling back to Lexabensa: {e}')
+
+    if ext:
+        paid_amount = ext['amount']
+
+        if paid_amount < plan.price:
+            return jsonify({
+                'error': f'Payment of KES {paid_amount} found but KES {plan.price} is required for this plan.'
+            }), 400
+
+        # Activate using external DB QoS
+        if mac:
+            from app.services.session_manager import activate_mac_session_from_external
+            mac_result = activate_mac_session_from_external(
+                mac_address=mac,
+                voucher_code=mpesa_code,
+                phone=phone,
+                amount=paid_amount,
+                upspeed_kbps=ext['upspeed'],
+                downspeed_kbps=ext['downspeed'],
+                downlimit_bytes=ext['downlimit'],
+                session_end=ext['session_end'],
+                venue=current_app.config['DEFAULT_VENUE'],
+            )
+            if not mac_result:
+                return jsonify({'error': 'Failed to activate session. Code may already be used.'}), 400
+
+            logger.info(f'M-Pesa code verified (external DB, MAC): {mpesa_code} KES {paid_amount} → {mac}')
+
+            return jsonify({
+                'status': 'success',
+                'mpesa_code': mpesa_code,
+                'amount': paid_amount,
+                'mac': mac,
+                'session_info': mac_result,
+                'message': f'Payment verified! Receipt: {mpesa_code}. Session {"extended" if mac_result["credits_count"] > 1 else "activated"}.',
+            })
+        else:
+            # No MAC — legacy flow
+            session = GuestSession(
+                phone=phone, plan_id=plan.id,
+                venue=current_app.config['DEFAULT_VENUE'],
+                ip_address=request.remote_addr, status='pending',
+            )
+            db.session.add(session)
+            db.session.flush()
+            payment = Payment(
+                session_id=session.id, method='mpesa', amount=plan.price,
+                phone=phone, account_ref=f'FAIBA-{session.id[:8].upper()}',
+                transaction_id=mpesa_code, status='completed',
+                completed_at=datetime.utcnow(),
+                status_message=f'M-Pesa code verified (external DB): {mpesa_code} (KES {paid_amount})',
+            )
+            db.session.add(payment)
+            db.session.commit()
+            activate_session(session.id)
+            logger.info(f'M-Pesa code verified (external DB, legacy): {mpesa_code} KES {paid_amount}')
+            return jsonify({
+                'status': 'success', 'mpesa_code': mpesa_code, 'amount': paid_amount,
+                'session_id': session.id,
+                'message': f'Payment verified! Receipt: {mpesa_code}. Your session is now active.',
+            })
+
+    # --- Strategy 2: Fallback to Lexabensa API ---
     from app.services.mpesa import check_payment
     result = check_payment(phone)
 
@@ -302,79 +429,56 @@ def mpesa_verify_code():
             'error': 'No M-Pesa payment found for this phone number. Please check and try again.'
         }), 400
 
-    # Check if the code matches
     api_code = (result.get('mpesa_code') or '').strip().upper()
     if api_code and api_code != mpesa_code:
         return jsonify({
             'error': 'M-Pesa code does not match the latest payment. Please verify the code.'
         }), 400
 
-    # Verify amount is sufficient
     paid_amount = result.get('amount', 0)
     if paid_amount < plan.price:
         return jsonify({
             'error': f'Payment of KES {paid_amount} found but KES {plan.price} is required for this plan.'
         }), 400
 
-    # If MAC address provided, use MAC-based stacking
-    mac = normalize_mac(mac_address)
+    # Activate via Lexabensa data
     if mac:
         mac_result = activate_mac_session(
-            mac_address=mac,
-            plan_id=plan.id,
-            credit_type='mpesa',
-            transaction_code=mpesa_code,
-            phone=phone,
-            amount_paid=paid_amount,
+            mac_address=mac, plan_id=plan.id, credit_type='mpesa',
+            transaction_code=mpesa_code, phone=phone, amount_paid=paid_amount,
             venue=current_app.config['DEFAULT_VENUE'],
         )
         if not mac_result:
             return jsonify({'error': 'Failed to activate session. Code may already be used.'}), 400
 
-        logger.info(f'M-Pesa code verified (MAC): {mpesa_code} KES {paid_amount} for {phone} → {mac}')
-
+        logger.info(f'M-Pesa code verified (Lexabensa, MAC): {mpesa_code} KES {paid_amount} → {mac}')
         return jsonify({
-            'status': 'success',
-            'mpesa_code': mpesa_code,
-            'amount': paid_amount,
-            'mac': mac,
-            'session_info': mac_result,
+            'status': 'success', 'mpesa_code': mpesa_code, 'amount': paid_amount,
+            'mac': mac, 'session_info': mac_result,
             'message': f'Payment verified! Receipt: {mpesa_code}. Session {"extended" if mac_result["credits_count"] > 1 else "activated"}.',
         })
 
-    # Fallback: legacy GuestSession flow (no MAC)
+    # No MAC — legacy
     session = GuestSession(
-        phone=phone,
-        plan_id=plan.id,
+        phone=phone, plan_id=plan.id,
         venue=current_app.config['DEFAULT_VENUE'],
-        ip_address=request.remote_addr,
-        status='pending',
+        ip_address=request.remote_addr, status='pending',
     )
     db.session.add(session)
     db.session.flush()
-
     payment = Payment(
-        session_id=session.id,
-        method='mpesa',
-        amount=plan.price,
-        phone=phone,
-        account_ref=f'FAIBA-{session.id[:8].upper()}',
-        transaction_id=mpesa_code,
-        status='completed',
+        session_id=session.id, method='mpesa', amount=plan.price,
+        phone=phone, account_ref=f'FAIBA-{session.id[:8].upper()}',
+        transaction_id=mpesa_code, status='completed',
         completed_at=datetime.utcnow(),
-        status_message=f'M-Pesa code verified: {mpesa_code} (KES {paid_amount})',
+        status_message=f'M-Pesa code verified (Lexabensa): {mpesa_code} (KES {paid_amount})',
     )
     db.session.add(payment)
     db.session.commit()
-
     activate_session(session.id)
-
-    logger.info(f'M-Pesa code verified (legacy): {mpesa_code} KES {paid_amount} for {phone}')
-
+    logger.info(f'M-Pesa code verified (Lexabensa, legacy): {mpesa_code} KES {paid_amount}')
     return jsonify({
-        'status': 'success',
-        'mpesa_code': mpesa_code,
-        'amount': paid_amount,
+        'status': 'success', 'mpesa_code': mpesa_code, 'amount': paid_amount,
         'session_id': session.id,
         'message': f'Payment verified! Receipt: {mpesa_code}. Your session is now active.',
     })
