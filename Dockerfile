@@ -6,6 +6,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     nginx \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
@@ -21,26 +22,7 @@ RUN mkdir -p /app/data
 # Copy nginx config
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
 
-# Create startup script
-RUN cat > /app/start.sh << 'SCRIPT'
-#!/bin/bash
-set -e
-
-# Update nginx to listen on the correct port
-sed -i "s/listen 80;/listen ${PORTAL_PORT:-8480};/" /etc/nginx/nginx.conf
-
-# Start nginx in background
-nginx -g 'daemon on;'
-
-# Start gunicorn (Flask app)
-exec gunicorn \
-    --bind 127.0.0.1:5000 \
-    --workers ${GUNICORN_WORKERS:-4} \
-    --timeout 120 \
-    --access-logfile - \
-    --error-logfile - \
-    "app:create_app()"
-SCRIPT
+# Make startup script executable
 RUN chmod +x /app/start.sh
 
 # Expose portal port
