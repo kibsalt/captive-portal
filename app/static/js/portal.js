@@ -8,6 +8,9 @@ let selectedPay = 'mpesa';
 let currentSessionId = null;
 let pollTimer = null;
 
+// MAC address from server (injected by BRAS redirect query param)
+const deviceMac = (window.PORTAL_CONFIG && window.PORTAL_CONFIG.mac_address) || '';
+
 // --- Payment method configs ---
 const payConfigs = {
   mpesa:    { label:'M-Pesa Phone Number',    hint:'You will receive an M-Pesa STK push prompt on your phone', placeholder:'07XX XXX XXX', type:'tel' },
@@ -118,6 +121,7 @@ async function handleMpesaCode() {
         mpesa_code: code,
         phone: phone,
         plan_id: selectedPlan.id,
+        mac_address: deviceMac,
       }),
     });
 
@@ -208,6 +212,7 @@ async function handlePay() {
         plan_id: selectedPlan.id,
         method: selectedPay,
         phone: phone,
+        mac_address: deviceMac,
       }),
     });
 
@@ -316,7 +321,7 @@ async function handleVoucher(code) {
     const response = await fetch(API_BASE + '/api/auth/voucher', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: code }),
+      body: JSON.stringify({ code: code, mac_address: deviceMac }),
     });
 
     const data = await response.json();
@@ -393,7 +398,7 @@ async function verifyOTP() {
     const response = await fetch(API_BASE + '/api/auth/otp/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: phone, code: code }),
+      body: JSON.stringify({ phone: phone, code: code, mac_address: deviceMac }),
     });
 
     const data = await response.json();
@@ -429,7 +434,7 @@ async function handleCode() {
     const response = await fetch(API_BASE + '/api/auth/voucher', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: code, phone: phone }),
+      body: JSON.stringify({ code: code, phone: phone, mac_address: deviceMac }),
     });
 
     const data = await response.json();

@@ -4,8 +4,8 @@ from datetime import datetime, timedelta
 
 from flask import Blueprint, request, jsonify, current_app
 
-from app.models import db, WiFiPlan, GuestSession, OTPRequest, Voucher
-from app.services.session_manager import activate_session
+from app.models import db, WiFiPlan, GuestSession, OTPRequest, Voucher, normalize_mac
+from app.services.session_manager import activate_session, activate_mac_session
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,7 @@ def verify_otp():
     Request JSON:
         phone: str
         code: str - 6-digit OTP code
+        mac_address: str (optional) - Device MAC for session stacking
     """
     data = request.get_json()
     if not data or not data.get('phone') or not data.get('code'):
@@ -94,6 +95,7 @@ def verify_otp():
 
     phone = data['phone'].strip().replace(' ', '')
     code = data['code'].strip()
+    mac_address = (data.get('mac_address') or '').strip()
 
     otp = OTPRequest.query.filter_by(
         phone=phone,
@@ -125,10 +127,30 @@ def verify_otp():
     if not free_plan:
         return jsonify({'error': 'Free plan not available'}), 500
 
+    # If MAC provided, use MAC-based stacking
+    mac = normalize_mac(mac_address)
+    if mac:
+        result = activate_mac_session(
+            mac_address=mac,
+            plan_id=free_plan.id,
+            credit_type='free',
+            phone=phone,
+            venue=current_app.config['DEFAULT_VENUE'],
+        )
+        if result:
+            return jsonify({
+                'status': 'success',
+                'message': f'Welcome! You have {free_plan.duration_label} of free WiFi.',
+                'mac': mac,
+                'session_info': result,
+            })
+
+    # Fallback: legacy session
     session = GuestSession(
         phone=phone,
         plan_id=free_plan.id,
         venue=current_app.config['DEFAULT_VENUE'],
+        mac_address=mac or '',
         ip_address=request.remote_addr,
         status='pending',
     )
@@ -148,9 +170,13 @@ def verify_otp():
 def redeem_voucher():
     """Validate and redeem a voucher or promo code.
 
+    If MAC address is provided, the voucher credit is stacked onto the
+    existing MacSession, extending time and data.
+
     Request JSON:
         code: str - Voucher/promo code
         phone: str (optional) - For receipt
+        mac_address: str (optional) - Device MAC for session stacking
     """
     data = request.get_json()
     if not data or not data.get('code'):
@@ -158,6 +184,7 @@ def redeem_voucher():
 
     code = data['code'].strip().upper()
     phone = data.get('phone', '').strip()
+    mac_address = (data.get('mac_address') or '').strip()
 
     voucher = Voucher.query.filter_by(code=code).first()
     if not voucher:
@@ -170,12 +197,35 @@ def redeem_voucher():
     voucher.redeemed = True
     voucher.redeemed_by = phone or 'anonymous'
     voucher.redeemed_at = datetime.utcnow()
+    db.session.commit()
 
-    # Create session
+    plan = voucher.plan
+
+    # If MAC provided, use MAC-based stacking
+    mac = normalize_mac(mac_address)
+    if mac:
+        result = activate_mac_session(
+            mac_address=mac,
+            plan_id=plan.id,
+            credit_type='voucher',
+            transaction_code=code,
+            phone=phone,
+            venue=current_app.config['DEFAULT_VENUE'],
+        )
+        if result:
+            return jsonify({
+                'status': 'success',
+                'message': f'Voucher redeemed! Session {"extended" if result["credits_count"] > 1 else "activated"} — {plan.duration_label} ({plan.data_mb} MB).',
+                'mac': mac,
+                'session_info': result,
+            })
+
+    # Fallback: legacy session
     session = GuestSession(
         phone=phone,
         plan_id=voucher.plan_id,
         venue=current_app.config['DEFAULT_VENUE'],
+        mac_address=mac or '',
         ip_address=request.remote_addr,
         status='pending',
     )
@@ -184,7 +234,6 @@ def redeem_voucher():
 
     activate_session(session.id)
 
-    plan = voucher.plan
     return jsonify({
         'status': 'success',
         'message': f'Voucher redeemed! You have {plan.duration_label} of Faiba WiFi ({plan.data_mb} MB).',

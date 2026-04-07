@@ -1,0 +1,102 @@
+# FreeRADIUS rlm_rest module configuration for Faiba WiFi Captive Portal
+#
+# This module calls the captive portal's REST API for:
+#   - Authentication: MAC-based auth (username=MAC, password=MAC)
+#   - Authorization: Returns QoS attributes or walled garden
+#   - Accounting: Tracks data usage per MAC session
+#
+# Installation:
+#   1. Copy this file to /etc/freeradius/3.0/mods-available/rest
+#   2. ln -s ../mods-available/rest /etc/freeradius/3.0/mods-enabled/rest
+#   3. Add 'rest' to the authorize, authenticate, and accounting sections
+#      in /etc/freeradius/3.0/sites-enabled/default
+#   4. Restart FreeRADIUS: systemctl restart freeradius
+
+rest {
+    #
+    # Portal API base URL
+    #
+    connect_uri = "http://192.168.14.4:8280"
+
+    # HTTP connection settings
+    connect_timeout = 5.0
+    timeout = 10
+
+    #
+    # AUTHORIZATION + AUTHENTICATION
+    #
+    # Called for every Access-Request. Portal checks if the MAC has an
+    # active session and returns appropriate attributes.
+    #
+    # Request body (JSON): User-Name, User-Password, NAS-IP-Address,
+    #   Calling-Station-Id, Called-Station-Id, Framed-IP-Address
+    #
+    # Response body (JSON): control:* and reply:* attributes
+    #   - Active session: Filter-Id=INTERNET-ACCESS, WISPr bandwidth, Session-Timeout
+    #   - No session:     Filter-Id=WALLED-GARDEN, WISPr-Redirection-URL
+    #
+    authorize {
+        uri = "${..connect_uri}/api/radius/auth"
+        method = 'post'
+        body = 'json'
+        data = '{ \
+            "User-Name": "%{User-Name}", \
+            "User-Password": "%{User-Password}", \
+            "NAS-IP-Address": "%{NAS-IP-Address}", \
+            "Calling-Station-Id": "%{Calling-Station-Id}", \
+            "Called-Station-Id": "%{Called-Station-Id}", \
+            "NAS-Identifier": "%{NAS-Identifier}", \
+            "Framed-IP-Address": "%{Framed-IP-Address}" \
+        }'
+        tls = ${..tls}
+    }
+
+    #
+    # ACCOUNTING
+    #
+    # Called for Accounting-Request (Start, Interim-Update, Stop).
+    # Portal uses this to track data usage per MAC and enforce quotas.
+    #
+    # On Interim-Update: if data quota is exceeded, portal sends a
+    # Disconnect-Message (DM) to the NAS to terminate the session.
+    #
+    accounting {
+        uri = "${..connect_uri}/api/radius/acct"
+        method = 'post'
+        body = 'json'
+        data = '{ \
+            "Acct-Status-Type": "%{Acct-Status-Type}", \
+            "User-Name": "%{User-Name}", \
+            "Acct-Session-Id": "%{Acct-Session-Id}", \
+            "Acct-Input-Octets": "%{Acct-Input-Octets}", \
+            "Acct-Output-Octets": "%{Acct-Output-Octets}", \
+            "Acct-Input-Gigawords": "%{Acct-Input-Gigawords}", \
+            "Acct-Output-Gigawords": "%{Acct-Output-Gigawords}", \
+            "Acct-Session-Time": "%{Acct-Session-Time}", \
+            "Framed-IP-Address": "%{Framed-IP-Address}", \
+            "NAS-IP-Address": "%{NAS-IP-Address}", \
+            "Calling-Station-Id": "%{Calling-Station-Id}" \
+        }'
+        tls = ${..tls}
+    }
+
+    #
+    # TLS settings (not needed for HTTP, but required by module syntax)
+    #
+    tls {
+    }
+
+    #
+    # Connection pool
+    #
+    pool {
+        start = 5
+        min = 3
+        max = 32
+        spare = 3
+        uses = 0
+        retry_delay = 30
+        lifetime = 0
+        idle_timeout = 60
+    }
+}

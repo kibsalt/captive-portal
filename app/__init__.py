@@ -26,11 +26,13 @@ def create_app():
     from app.routes.payment import payment_bp
     from app.routes.auth import auth_bp
     from app.routes.session import session_bp
+    from app.routes.radius import radius_bp
 
     app.register_blueprint(portal_bp)
     app.register_blueprint(payment_bp, url_prefix='/api/payment')
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(session_bp, url_prefix='/api/session')
+    app.register_blueprint(radius_bp, url_prefix='/api/radius')
 
     with app.app_context():
         db.create_all()

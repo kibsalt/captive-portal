@@ -90,6 +90,21 @@
         <div class="portal-subtitle">Choose a plan and pay instantly</div>
       </div>
 
+      {% if mac_session %}
+      <div id="active-session-banner" style="background:var(--green-50);border-bottom:2px solid var(--green-400);padding:12px 20px;display:flex;align-items:center;gap:10px;">
+        <div style="width:10px;height:10px;border-radius:50%;background:var(--green-500);animation:pulse 2s ease-in-out infinite;flex-shrink:0;"></div>
+        <div style="flex:1;">
+          <div style="font-size:13px;font-weight:700;color:var(--green-800);">Session Active</div>
+          <div style="font-size:11px;color:var(--text-muted);">
+            {{ mac_session.remaining_minutes }} min remaining
+            {% if mac_session.remaining_data_mb %} &middot; {{ mac_session.remaining_data_mb }} MB left{% endif %}
+            &middot; {{ mac_session.speed_down }} Mbps
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--green-700);font-weight:600;text-transform:uppercase;">Extend below</div>
+      </div>
+      {% endif %}
+
       <div class="tabs">
         <button class="tab active" onclick="switchTab('paid',this)">Data Plans</button>
         <button class="tab" onclick="switchTab('free',this)">Free Access</button>
@@ -278,6 +293,22 @@
   <button class="success-close" onclick="closeSuccess()">Browse the Internet</button>
 </div>
 
+<script>
+  // Pass MAC address and session info from server to JS
+  window.PORTAL_CONFIG = {
+    mac_address: '{{ mac_address | default("", true) }}',
+    {% if mac_session %}
+    active_session: {
+      remaining_minutes: {{ mac_session.remaining_minutes }},
+      remaining_data_mb: {{ mac_session.remaining_data_mb or 'null' }},
+      speed_down: {{ mac_session.speed_down }},
+      credits: {{ mac_session.credits }},
+    },
+    {% else %}
+    active_session: null,
+    {% endif %}
+  };
+</script>
 <script src="{{ url_for('static', filename='js/portal.js') }}"></script>
 </body>
 </html>

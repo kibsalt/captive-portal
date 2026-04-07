@@ -3,8 +3,8 @@ from datetime import datetime
 
 from flask import Blueprint, request, jsonify, current_app
 
-from app.models import db, WiFiPlan, GuestSession, Payment
-from app.services.session_manager import activate_session
+from app.models import db, WiFiPlan, GuestSession, Payment, MacCredit, normalize_mac
+from app.services.session_manager import activate_session, activate_mac_session
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ def initiate_payment():
     plan_id = data.get('plan_id')
     method = data.get('method')
     phone = data.get('phone', '').strip()
+    mac_address = data.get('mac_address', '').strip()
 
     if not plan_id or not method:
         return jsonify({'error': 'plan_id and method are required'}), 400
@@ -40,12 +41,15 @@ def initiate_payment():
     if method in ('mpesa', 'airtel', 'tkash', 'sms', 'pesalink') and not phone:
         return jsonify({'error': 'Phone number required for this payment method'}), 400
 
+    # Normalize MAC if provided
+    mac = normalize_mac(mac_address)
+
     # Create guest session
     session = GuestSession(
         phone=phone,
         plan_id=plan.id,
         venue=current_app.config['DEFAULT_VENUE'],
-        mac_address=data.get('mac_address', ''),
+        mac_address=mac or '',
         ip_address=data.get('ip_address', request.remote_addr),
         status='pending',
     )
@@ -254,10 +258,14 @@ def mpesa_verify_code():
     This allows users who already paid (or whose STK push failed) to enter
     their M-Pesa transaction code to activate their WiFi session.
 
+    If a MAC address is provided, the payment is stacked onto the MacSession,
+    allowing multiple payments to extend the same session.
+
     Request JSON:
         mpesa_code: str - M-Pesa confirmation code (e.g. SJ12ABC345)
         phone: str - Phone number used for payment
         plan_id: int - WiFi plan ID
+        mac_address: str (optional) - Device MAC address
     """
     data = request.get_json()
     if not data:
@@ -266,6 +274,7 @@ def mpesa_verify_code():
     mpesa_code = (data.get('mpesa_code') or '').strip().upper()
     phone = (data.get('phone') or '').strip()
     plan_id = data.get('plan_id')
+    mac_address = (data.get('mac_address') or '').strip()
 
     if not mpesa_code:
         return jsonify({'error': 'M-Pesa confirmation code is required'}), 400
@@ -278,9 +287,10 @@ def mpesa_verify_code():
     if not plan or not plan.active or plan.is_free:
         return jsonify({'error': 'Invalid plan'}), 400
 
-    # Check if this M-Pesa code was already used
-    existing = Payment.query.filter_by(transaction_id=mpesa_code, status='completed').first()
-    if existing:
+    # Check if this M-Pesa code was already used (in Payment or MacCredit)
+    existing_payment = Payment.query.filter_by(transaction_id=mpesa_code, status='completed').first()
+    existing_credit = MacCredit.query.filter_by(transaction_code=mpesa_code).first()
+    if existing_payment or existing_credit:
         return jsonify({'error': 'This M-Pesa code has already been used'}), 400
 
     # Verify the M-Pesa code via Lexabensa API
@@ -306,7 +316,33 @@ def mpesa_verify_code():
             'error': f'Payment of KES {paid_amount} found but KES {plan.price} is required for this plan.'
         }), 400
 
-    # Create session and payment records
+    # If MAC address provided, use MAC-based stacking
+    mac = normalize_mac(mac_address)
+    if mac:
+        mac_result = activate_mac_session(
+            mac_address=mac,
+            plan_id=plan.id,
+            credit_type='mpesa',
+            transaction_code=mpesa_code,
+            phone=phone,
+            amount_paid=paid_amount,
+            venue=current_app.config['DEFAULT_VENUE'],
+        )
+        if not mac_result:
+            return jsonify({'error': 'Failed to activate session. Code may already be used.'}), 400
+
+        logger.info(f'M-Pesa code verified (MAC): {mpesa_code} KES {paid_amount} for {phone} → {mac}')
+
+        return jsonify({
+            'status': 'success',
+            'mpesa_code': mpesa_code,
+            'amount': paid_amount,
+            'mac': mac,
+            'session_info': mac_result,
+            'message': f'Payment verified! Receipt: {mpesa_code}. Session {"extended" if mac_result["credits_count"] > 1 else "activated"}.',
+        })
+
+    # Fallback: legacy GuestSession flow (no MAC)
     session = GuestSession(
         phone=phone,
         plan_id=plan.id,
@@ -333,7 +369,7 @@ def mpesa_verify_code():
 
     activate_session(session.id)
 
-    logger.info(f'M-Pesa code verified manually: {mpesa_code} KES {paid_amount} for {phone}')
+    logger.info(f'M-Pesa code verified (legacy): {mpesa_code} KES {paid_amount} for {phone}')
 
     return jsonify({
         'status': 'success',

@@ -1,0 +1,102 @@
+# FreeRADIUS virtual server configuration for Faiba WiFi Captive Portal
+#
+# This integrates with the captive portal via rlm_rest for MAC-based auth.
+#
+# Architecture:
+#   BRAS/NAS → Access-Request(User-Name=MAC, Password=MAC)
+#     → FreeRADIUS → rlm_rest → Portal API /api/radius/auth
+#       → Active session? → Access-Accept + QoS (internet)
+#       → No session?     → Access-Accept + walled garden (portal only)
+#
+# Payment flow:
+#   User pays → Portal creates/extends MacSession → CoA sent to BRAS
+#     → BRAS applies new QoS → Internet unlocked
+#
+# Multiple payments stack:
+#   - M-Pesa code 1: +24h +2GB → expires_at extended
+#   - Voucher code:  +7d  +8GB → expires_at extended further
+#   - All credits tied to same MAC address
+#
+# Installation:
+#   1. Copy to /etc/freeradius/3.0/sites-available/default
+#   2. Ensure rest module is enabled (mods-enabled/rest)
+#   3. systemctl restart freeradius
+
+server default {
+
+    listen {
+        type = auth
+        ipaddr = *
+        port = 1812
+    }
+
+    listen {
+        type = acct
+        ipaddr = *
+        port = 1813
+    }
+
+    #
+    # Authorization: determine HOW to authenticate and WHAT to return
+    #
+    authorize {
+        # Log the request
+        linelog
+
+        # Call the portal REST API
+        # This sets control:Auth-Type and reply attributes based on MAC session status
+        rest
+
+        # If the REST module set Auth-Type, use it
+        # Otherwise, default to accepting MAC auth
+        if (!control:Auth-Type) {
+            update control {
+                Auth-Type := Accept
+            }
+        }
+    }
+
+    #
+    # Authentication: verify credentials
+    # Since we use MAC=MAC, the REST module already validated this.
+    # Auth-Type=Accept was set by the authorize section.
+    #
+    authenticate {
+        Auth-Type Accept {
+            ok
+        }
+
+        Auth-Type Reject {
+            reject
+        }
+    }
+
+    #
+    # Post-authentication: log the result
+    #
+    post-auth {
+        linelog
+
+        Post-Auth-Type REJECT {
+            linelog
+        }
+    }
+
+    #
+    # Accounting: track session data usage
+    # The portal uses this to enforce data quotas and auto-disconnect
+    #
+    accounting {
+        rest
+        linelog
+    }
+
+    #
+    # Pre-proxy and post-proxy (unused in this setup)
+    #
+    pre-proxy {
+    }
+
+    post-proxy {
+    }
+}
